@@ -1,0 +1,96 @@
+# skills/enforce_policy.yaml
+#
+# Rules are evaluated with accumulate-then-decide semantics:
+#   ALL matching rules fire. Worst decision (block > warn > pass) wins.
+#   Rule ordering no longer matters for correctness (only for readability).
+#
+# `priority` is optional (higher = evaluated first in logs, but all rules still run).
+#
+# DSL:
+#   field == "literal"               equality
+#   field != "literal"               inequality
+#   contains(field, "substring")     substring check
+#   expr and expr / or / not / (…)   combinators
+#   true | false                     literals
+#
+# Input fields (populated by mandatory pipeline in agent.ts):
+#   assertion_risk              "low" | "medium" | "high"
+#   assertion_reason            human-readable string
+#   failure_summary             empty string if no failures
+#   parse_error                 "true" | "false"
+#   conditional_wrapping_added  "true" | "false"
+#   strictness_delta            "negative" | "non_negative"
+
+name: enforce_policy
+description: >
+  Accumulate-then-decide policy engine. All matching rules fire;
+  worst signal (block > warn > pass) wins. No rule can shadow another.
+
+rules:
+  # --- Hard blocks -----------------------------------------------------------
+
+  - id: block_parse_error
+    priority: 100
+    condition: parse_error == "true"
+    decision: block
+    reason: "Un-parseable JS/TS in diff — cannot safely audit assertion changes"
+
+  - id: block_high_risk
+    priority: 90
+    condition: assertion_risk == "high"
+    decision: block
+    reason: "High-risk assertion change detected"
+
+  - id: block_assertion_removed
+    priority: 90
+    condition: contains(assertion_reason, "removed")
+    decision: block
+    reason: "Assertions removed"
+
+  - id: block_assertion_weakened
+    priority: 90
+    condition: contains(assertion_reason, "weakened")
+    decision: block
+    reason: "Assertions weakened"
+
+  - id: block_conditional_wrapping
+    priority: 85
+    condition: conditional_wrapping_added == "true"
+    decision: block
+    reason: "Assertions moved behind conditional branches (evasion pattern)"
+
+  - id: block_strictness_decreased
+    priority: 85
+    condition: strictness_delta == "negative"
+    decision: block
+    reason: "Matcher strictness decreased (e.g. toBe → toContain)"
+
+  # --- Warnings --------------------------------------------------------------
+
+  - id: warn_medium_with_failures
+    priority: 50
+    condition: assertion_risk == "medium" and failure_summary != ""
+    decision: warn
+    reason: "Assertion changes combined with test failures — review required"
+
+  - id: warn_medium_risk
+    priority: 40
+    condition: assertion_risk == "medium"
+    decision: warn
+    reason: "Assertions added — manual review recommended"
+
+  - id: warn_failures_present
+    priority: 30
+    condition: failure_summary != ""
+    decision: warn
+    reason: "Test failures present"
+
+  # --- Default pass ----------------------------------------------------------
+  # This always fires, but block/warn rules above will override it
+  # (accumulate-then-decide: worst signal wins).
+
+  - id: default_pass
+    priority: 0
+    condition: "true"
+    decision: pass
+    reason: "No critical issues detected"

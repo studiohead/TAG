@@ -1,0 +1,60 @@
+name: Test Automation Governance — CI
+
+on:
+  push:
+    branches: ["main", "release/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: "Node ${{ matrix.node-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        node-version: ["18", "20", "22"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # needed for git diff HEAD~1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test (with coverage)
+        env:
+          TGA_LOG_LEVEL: warning
+          TGA_AUDIT_LOG: /tmp/tga-audit.jsonl
+          TGA_REPORT_PATH: /tmp/tga-report.json
+        run: npm run test:coverage
+
+      - name: Upload audit log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tga-audit-node${{ matrix.node-version }}
+          path: /tmp/tga-audit.jsonl
+          if-no-files-found: ignore
+
+      - name: Upload machine report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tga-report-node${{ matrix.node-version }}
+          path: /tmp/tga-report.json
+          if-no-files-found: ignore
